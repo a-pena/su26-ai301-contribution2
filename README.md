@@ -167,6 +167,14 @@ For Phase I, I selected RimSort issue #1735 as my second contribution issue. I r
 
 To be completed in Phase II.
 
+### Week 3 Progress
+
+To be completed in Phase III.
+
+### Week 4 Progress
+
+To be completed in Phase VI.
+
 ### Code Changes
 
 To be completed in Phase III.
@@ -190,20 +198,25 @@ To be completed in Phase III.
 **Status:** Not submitted yet.
 
 ---
-
 ## Learnings & Reflections
 
 ### Technical Skills Gained
 
-To be completed as the contribution progresses.
+During Phase I, I strengthened my understanding of the open source contribution workflow, including selecting an issue, checking whether it is active and claimable, forking the target repository, and creating a separate contribution README to document my process. I also practiced reading a GitHub issue carefully and translating the maintainer/user request into a clear problem summary, expected behavior, current behavior, and initial implementation direction.
+
+This phase also helped me think more intentionally about user experience in desktop applications. For RimSort issue #1735, the main technical idea is not just “add a pop-up,” but to protect users from accidentally starting a non-cancelable action. I learned to identify this as a UI safety improvement and to plan ahead for finding existing confirmation dialog patterns in the codebase during the next phase.
 
 ### Challenges Overcome
 
-To be completed as the contribution progresses.
+One challenge during Phase I was organizing Contribution 2 separately from my first contribution. I decided to create a separate repository for this second contribution README so that my RimSort work can stay clean and easy to track without mixing it with my completed USACO contribution.
+
+Another challenge was making sure I did not jump ahead into implementation too early. Since Phase I is focused on issue selection, claiming, forking, and documentation, I kept the README honest by marking reproduction, solution details, testing, and pull request sections as future work for later phases. This helped me keep the scope clear and follow the contribution process step by step.
 
 ### What I'd Do Differently Next Time
 
-To be completed after the contribution is complete.
+Next time, I would start by creating the contribution README repository first and pasting the full template before filling in any details. That would make it easier to keep the documentation organized from the beginning.
+
+I would also create a small personal checklist before starting Phase I, including: confirm the issue is open, check labels and assignees, comment on the issue, claim it in Slack or the course sheet, fork the project, create the README, and update the status. Having that checklist ready would make the process faster and reduce confusion.
 
 ---
 
