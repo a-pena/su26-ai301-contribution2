@@ -1,9 +1,13 @@
 # Contribution 2: Add confirmation before verifying game files from menu bar
 
 **Contribution Number:** 2  
+
 **Student:** Andrea Pena
+
 **Issue:** [RimSort/RimSort #1735 — Add confirmation before verifying game files from menu bar](https://github.com/RimSort/RimSort/issues/1735)  
+
 **Fork:** [a-pena/RimSort](https://github.com/a-pena/RimSort)  
+
 **Status:** Phase I Complete
 
 ---
