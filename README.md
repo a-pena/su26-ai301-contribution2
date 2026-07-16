@@ -10,7 +10,7 @@
 
 **Working Branch:** [fix-issue-1735](https://github.com/a-pena/RimSort/tree/fix-issue-1735)
 
-**Status:** Phase II Complete
+**Status:** Phase III In Progress
 
 ---
 
@@ -195,31 +195,109 @@ I will verify the fix manually by launching RimSort locally, selecting **Downloa
 
 ## Testing Strategy
 
-### Unit Tests
+### Automated Tests
 
-To be completed in Phase III if the project has relevant test patterns for this UI behavior.
+I added two automated tests in `tests/views/test_menu_bar.py` under the
+`TestMenuBarGameFileVerification` class.
 
-- [ ] Test case 1: Confirmation accepted starts verification.
-- [ ] Test case 2: Confirmation canceled does not start verification.
-- [ ] Test case 3: Existing verification behavior remains unchanged after confirmation.
+The tests trigger the real `steam_verify_game_files_action` from the menu bar
+instead of calling the controller method directly. This validates both the Qt
+action connection and the confirmation behavior.
 
-### Integration Tests
+#### Test 1: Confirmation accepted
 
-To be completed in Phase III if applicable.
+`test_verify_game_files_confirmed_emits_event`
 
-- [ ] Integration scenario 1: Menu bar action opens confirmation dialog.
-- [ ] Integration scenario 2: Canceling the dialog prevents the verification process.
+This test mocks `show_dialogue_conditional()` to return `True`, triggers the
+real menu action, verifies that the warning dialog is shown with the expected
+title, message, and warning icon, and confirms that
+`do_steam_verify_game_files.emit()` is called exactly once.
+
+#### Test 2: Confirmation canceled
+
+`test_verify_game_files_cancelled_does_not_emit_event`
+
+This test mocks `show_dialogue_conditional()` to return `False`, triggers the
+real menu action, confirms that the dialog is displayed, and verifies that
+`do_steam_verify_game_files.emit()` is not called.
+
+#### Focused Test Command
+
+```powershell
+uv run pytest tests\views\test_menu_bar.py -k "verify_game_files" -v
+```
+
+Result:
+
+```text
+2 passed, 6 deselected
+```
+
+#### Complete Menu Bar Test File
+
+```powershell
+uv run pytest tests\views\test_menu_bar.py -v
+```
+
+Result:
+
+```text
+8 passed
+```
+
+#### Related Regression Validation
+
+I also ran the complete menu bar test file together with the existing
+Troubleshooting controller tests:
+
+```powershell
+uv run pytest tests\views\test_menu_bar.py tests\controllers\test_troubleshooting.py -v
+```
+
+Result:
+
+```text
+24 passed in 3.08s
+```
+
+This broader validation is important because the Troubleshooting panel also
+has a separate way to request Steam game-file verification. The new
+confirmation was intentionally added only to the menu-bar entry point, and
+all existing Troubleshooting tests continued to pass.
+
+### Syntax and Diff Validation
+
+The implementation file was checked with:
+
+```powershell
+python -m py_compile app\controllers\menu_bar_controller.py
+```
+
+No syntax errors were reported.
+
+The implementation and test changes were also checked with:
+
+```powershell
+git diff --check
+```
+
+No whitespace errors were reported.
 
 ### Manual Testing
 
-Planned manual testing for Phase III:
+The planned final manual validation is:
 
-1. Launch RimSort locally.
-2. Select **Download → Verify Game Files** from the menu bar.
-3. Confirm that a confirmation dialog appears before verification starts.
-4. Click cancel and confirm verification does not begin.
-5. Select the action again, click confirm, and confirm the existing verification behavior continues as expected.
-6. Confirm that unrelated menu actions still work normally.
+1. Launch RimSort from source.
+2. Open **Download → Verify Game Files**.
+3. Confirm that the warning dialog appears before verification begins.
+4. Select **Cancel** and verify that no verification behavior starts.
+5. Trigger the action again and select **Confirm**.
+6. Verify that RimSort continues into its existing Steam verification flow.
+7. Confirm that the separate Troubleshooting verification flow remains unchanged.
+
+The automated tests already validate the confirm and cancel control flow. The
+final application-level manual validation will be completed before the Phase
+III submission.
 
 ---
 
@@ -243,7 +321,41 @@ I also investigated the codebase and found that the **Verify Game Files** menu a
 
 ### Week 3 Progress
 
-To be completed in Phase III.
+During Phase III, I traced the **Verify Game Files** menu action from
+`app/views/menu_bar.py` through `app/controllers/menu_bar_controller.py` and
+the shared Steam verification signal.
+
+The original menu-bar action was connected directly to
+`EventBus().do_steam_verify_game_files`, which meant the verification flow
+started immediately when the user selected the action.
+
+I changed the connection so that it now calls a new controller method:
+
+```python
+self.menu_bar.steam_verify_game_files_action.triggered.connect(
+    self._on_steam_verify_game_files_triggered
+)
+```
+
+The new `_on_steam_verify_game_files_triggered()` method reuses RimSort's
+existing `show_dialogue_conditional` helper and displays a warning explaining
+that the process cannot be canceled after it begins.
+
+If the user cancels or dismisses the confirmation, the method returns without
+emitting the verification event. If the user confirms, the existing
+`do_steam_verify_game_files` event is emitted and the original verification
+flow continues unchanged.
+
+I intentionally placed the confirmation in
+`app/controllers/menu_bar_controller.py` rather than inside the shared
+`do_steam_verify_game_files()` implementation. This keeps the change scoped to
+the menu-bar behavior requested in issue #1735 and avoids adding an unexpected
+second confirmation to the separate Troubleshooting flow.
+
+I also added two automated tests that exercise the real menu action and verify
+both the confirm and cancel paths. The focused tests passed, the complete menu
+bar test file passed, and the combined menu bar and Troubleshooting validation
+completed with 24 passing tests.
 
 ### Week 4 Progress
 
@@ -251,15 +363,46 @@ To be completed in Phase IV.
 
 ### Code Changes
 
-To be completed in Phase III.
+#### Implementation File
 
-- **Files expected to be modified:** 
-  - `app/views/main_content_panel.py`
-- **Files reviewed:** 
-  - `app/views/menu_bar.py`
-  - `app/views/main_content_panel.py`
-- **Key commits:** To be added in Phase III.
-- **Approach decisions:** I plan to keep the change small and focused by adding the confirmation before the existing verification logic continues, instead of changing the menu structure or rewriting the verification flow.
+- `app/controllers/menu_bar_controller.py`
+  - Imported RimSort's existing `show_dialogue_conditional` helper.
+  - Reconnected `steam_verify_game_files_action` to the new controller method.
+  - Added `_on_steam_verify_game_files_triggered()`.
+  - Added confirm and cancel control flow before emitting the existing
+    verification event.
+
+#### Test File
+
+- `tests/views/test_menu_bar.py`
+  - Added `TestMenuBarGameFileVerification`.
+  - Added a test for the confirmed path.
+  - Added a test for the canceled path.
+  - Triggered the real Qt menu action in both tests.
+
+#### Key Phase III Commits
+
+| Commit | Description |
+|---|---|
+| `f8142df` | Added confirmation before menu-bar game-file verification |
+| `e3894c49` | Added automated tests for confirmation and cancellation |
+
+#### Scope Decision
+
+The confirmation was added only to the menu-bar entry point. I did not modify
+`app/views/main_content_panel.py` or the shared verification implementation
+because doing so could affect other callers, including the existing
+Troubleshooting flow. This keeps the diff directly scoped to issue #1735 and
+preserves existing behavior outside the menu bar.
+
+#### Commit Cadence
+
+The implementation and testing work were completed as separate, meaningful
+commits:
+
+- July 13, 2026: implementation
+- July 15, 2026: automated tests
+- July 16, 2026: Phase III validation and documentation
 
 ---
 
@@ -294,6 +437,27 @@ One challenge during Phase I was organizing Contribution 2 separately from my fi
 Another challenge was making sure I did not jump ahead into implementation too early. Since Phase I was focused on issue selection, claiming, forking, and documentation, I kept the README honest by marking reproduction, solution details, testing, and pull request sections as future work for later phases. This helped me keep the scope clear and follow the contribution process step by step.
 
 During Phase II, I had to install missing development tools and confirm the project could run locally on Windows. I installed `uv` and `just`, cloned the project with submodules, and ran the setup successfully. I also had to handle first-launch prompts related to missing RimSort paths, SteamCMD, and Steam Client Integration. Instead of treating these prompts as blockers, I documented them as part of the local setup and continued testing the menu action needed for the issue.
+
+During Phase III, one challenge was determining where the confirmation should
+be added. The verification event is shared with another workflow in the
+Troubleshooting panel. Adding the dialog inside the shared verification method
+could have changed behavior beyond the menu-bar issue. I resolved this by
+placing the confirmation in `MenuBarController`, immediately before the
+menu-bar action emits the existing event.
+
+Another challenge was running the new tests with the correct Python
+environment. Running `python -m pytest` initially used the global Python 3.13
+installation, which did not have `pytest` installed. Rather than installing
+packages into the global environment, I inspected the repository configuration
+and found the project's `.venv`, `uv.lock`, and pytest dependencies in
+`pyproject.toml`. I then ran the tests through `uv run pytest`, which used
+RimSort's configured environment successfully.
+
+I also had to ensure the implementation diff stayed focused. An early
+full-file replacement introduced unrelated formatting changes. I restored the
+original file and reapplied only the required import, signal connection, and
+controller method. The final implementation diff changed one file with 17
+insertions and one deletion.
 
 ### What I'd Do Differently Next Time
 
