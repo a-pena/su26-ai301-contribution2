@@ -10,7 +10,7 @@
 
 **Working Branch:** [fix-issue-1735](https://github.com/a-pena/RimSort/tree/fix-issue-1735)
 
-**Status:** Phase III In Progress
+**Status:** Phase III Complete
 
 ---
 
@@ -285,21 +285,70 @@ No whitespace errors were reported.
 
 ### Manual Testing
 
-The planned final manual validation is:
+I completed the final application-level manual validation by launching RimSort
+from source with:
 
-1. Launch RimSort from source.
-2. Open **Download → Verify Game Files**.
-3. Confirm that the warning dialog appears before verification begins.
-4. Select **Cancel** and verify that no verification behavior starts.
-5. Trigger the action again and select **Confirm**.
-6. Verify that RimSort continues into its existing Steam verification flow.
-7. Confirm that the separate Troubleshooting verification flow remains unchanged.
+```powershell
+uv run python -m app
+```
 
-The automated tests already validate the confirm and cancel control flow. The
-final application-level manual validation will be completed before the Phase
-III submission.
+Because my local environment did not have all RimSort paths, SteamCMD, or Steam
+Client Integration configured, the application displayed its expected startup
+warnings. I dismissed those prompts without changing unrelated settings and
+continued to the menu-bar test.
+
+#### Manual Test 1: Confirmation dialog appears
+
+1. Opened **Download → Verify Game Files**.
+2. Confirmed that RimSort displayed a warning dialog titled **Verify Game Files**.
+3. Confirmed that the message explained that the process cannot be canceled once
+   it has started.
+4. Confirmed that the dialog provided **Yes** and **No** choices.
+
+**Result:** Passed.
+
+#### Manual Test 2: Cancel path
+
+1. Selected **No** in the confirmation dialog.
+2. Confirmed that the dialog closed.
+3. Confirmed that no Steam Client Integration warning appeared afterward.
+4. Confirmed that the verification flow did not continue.
+
+**Result:** Passed.
+
+#### Manual Test 3: Confirm path
+
+1. Opened **Download → Verify Game Files** again.
+2. Selected **Yes** in the confirmation dialog.
+3. Confirmed that RimSort continued into the existing verification flow.
+4. Because Steam Client Integration was disabled in my local environment,
+   RimSort displayed its existing **Steam Client Integration is disabled**
+   warning.
+
+**Result:** Passed.
+
+The manual results match the automated tests: canceling prevents the event from
+being emitted, while confirming preserves the existing verification behavior.
+The separate Troubleshooting flow also remained unchanged, as confirmed by the
+combined automated regression run with 24 passing tests.
 
 ---
+
+## Phase III Testing Rubric Mapping
+
+| Rubric Requirement | Evidence |
+|---|---|
+| Branch contains meaningful commits since Phase II | Implementation commit `f8142df` and test commit `e3894c49` are present on `fix-issue-1735`. |
+| Commit cadence is regular | Meaningful implementation, testing, validation, and documentation work was completed across July 13, July 15, July 16, and final Phase III validation. |
+| Commit messages are descriptive | `Add confirmation before menu game file verification`, `Add tests for game verification confirmation`, and `Document Phase III implementation and validation`. |
+| Diff is scoped to the issue | Implementation changed only `app/controllers/menu_bar_controller.py`; tests changed only `tests/views/test_menu_bar.py`. |
+| At least one new test exercises the fix | Two new tests exercise both confirmation accepted and confirmation canceled behavior. |
+| Existing tests still pass | Focused tests: `2 passed`; complete menu-bar tests: `8 passed`; combined menu-bar and Troubleshooting validation: `24 passed in 3.08s`. |
+| Tests follow project patterns | Tests use the existing pytest, `unittest.mock.patch`, Qt action trigger, and `EventBus` mocking patterns already used in RimSort tests. |
+| Implementation Progress names files and commits | The README lists both modified files and commit hashes `f8142df` and `e3894c49`. |
+| Challenges Faced documents real obstacles | The README documents scope placement, the incorrect global Python environment, and restoring an overly broad early diff. |
+| Testing notes explain manual and automated validation | The README includes focused, full-file, regression, syntax, diff, and manual confirm/cancel validation results. |
+| Engineering judgment beyond the minimum | The confirmation was intentionally limited to the menu-bar entry point to avoid changing the separate Troubleshooting flow, and the implementation reused RimSort's existing `show_dialogue_conditional` helper. |
 
 ## Implementation Notes
 
