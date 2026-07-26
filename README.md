@@ -6,9 +6,11 @@
 
 **Issue:** [RimSort/RimSort #1735 — Add confirmation before verifying game files from menu bar](https://github.com/RimSort/RimSort/issues/1735)  
 
-**Fork:** [a-pena/RimSort](https://github.com/a-pena/RimSort)  
+**Fork:** [a-pena/RimSort](https://github.com/a-pena/RimSort)
 
 **Working Branch:** [fix-issue-1735](https://github.com/a-pena/RimSort/tree/fix-issue-1735)
+
+**Pull Request:** [RimSort/RimSort #2338 — Add confirmation before verifying game files from menu bar](https://github.com/RimSort/RimSort/pull/2338)
 
 **Status:** Phase IV Complete — Pull Request Submitted
 
