@@ -10,7 +10,7 @@
 
 **Working Branch:** [fix-issue-1735](https://github.com/a-pena/RimSort/tree/fix-issue-1735)
 
-**Status:** Phase III Complete
+**Status:** Phase IV Complete — Pull Request Submitted
 
 ---
 
@@ -129,9 +129,12 @@ The application launched successfully. During first launch, RimSort displayed se
 
 ## Solution Approach
 
-### Analysis
+### Phase II Analysis and Plan
 
-The root cause is that the **Verify Game Files** menu action is connected directly to the verification handler. When the user selects **Download → Verify Game Files**, RimSort immediately calls the verification flow instead of asking the user to confirm first.
+During Phase II, I identified that the **Verify Game Files** menu action was
+connected directly to the existing verification flow. My initial plan was to
+add a confirmation step before that flow continued, reuse RimSort's existing
+dialog patterns, and manually verify both the confirm and cancel paths.
 
 The menu item is created in `app/views/menu_bar.py`:
 
@@ -141,55 +144,35 @@ self.steam_verify_game_files_action = self._add_action(
 )
 ```
 
-The verification behavior is handled in `app/views/main_content_panel.py` inside:
+The shared verification behavior eventually reaches
+`do_steam_verify_game_files()` in `app/views/main_content_panel.py`.
 
-```python
-def do_steam_verify_game_files(self) -> None:
-```
+### Phase III Final Implementation
 
-In my local reproduction, the function displayed a Steam Client Integration warning because my test instance did not have Steam Client Integration enabled. However, that still confirms the current behavior: the action begins the verification flow immediately, without a confirmation dialog.
+During Phase III, deeper code tracing showed that adding the confirmation inside
+the shared verification method could also affect the separate Troubleshooting
+workflow. I therefore implemented the confirmation at the menu-bar entry point
+inside `app/controllers/menu_bar_controller.py`.
 
-### Proposed Solution
+The final implementation:
 
-I plan to add a confirmation dialog before the verification flow begins. When the user selects **Download → Verify Game Files**, RimSort should ask whether the user really wants to continue. If the user confirms, the existing verification logic should run normally. If the user cancels, the function should return without doing anything.
+1. Imports RimSort's existing `show_dialogue_conditional` helper.
+2. Reconnects `steam_verify_game_files_action` to a new controller method.
+3. Displays a warning that the process cannot be canceled after it starts.
+4. Returns without emitting the event when the user cancels.
+5. Emits the existing `do_steam_verify_game_files` event when the user confirms.
+6. Leaves the separate Troubleshooting verification flow unchanged.
 
-### Implementation Plan
+### Review and Evaluation
 
-Using UMPIRE framework (adapted):
+I reviewed the final change to confirm that it:
 
-**Understand:**  
-The problem is that **Verify Game Files** can be triggered accidentally from the menu bar, and the verification process currently starts without a confirmation prompt. Since this action can be disruptive and cannot be canceled once started, the app should ask the user to confirm before continuing.
-
-**Match:**  
-I will look for existing confirmation dialog patterns in the RimSort codebase so the new prompt matches the project’s current UI style. The project already uses dialog helpers such as warning dialogs, so I will reuse the existing dialog pattern instead of creating a new custom UI style.
-
-**Plan:**
-
-1. Locate the handler connected to `steam_verify_game_files_action`.
-2. Add a confirmation check before the existing verification logic runs.
-3. Use the existing RimSort dialog/helper pattern for user prompts.
-4. The confirmation text should clearly explain that verifying game files may take time and should only continue if the user intended to start it.
-5. If the user cancels, return immediately and do not continue to Steam Client Integration checks or verification logic.
-6. If the user confirms, continue with the existing behavior in `do_steam_verify_game_files()`.
-7. Manually test both paths:
-   - Cancel path: no verification flow should start.
-   - Confirm path: existing verification behavior should continue.
-
-**Implement:**  
-Implementation will be completed in Phase III on branch: [fix-issue-1735](https://github.com/a-pena/RimSort/tree/fix-issue-1735)
-
-**Review:**  
-Before submitting a pull request, I will review the change to make sure:
-
-- It follows RimSort’s existing dialog style.
-- It changes only the files needed for this issue.
-- It does not alter unrelated menu behavior.
-- Canceling the confirmation prevents the verification flow.
-- Confirming preserves the current verification behavior.
-- The text is clear and user-friendly.
-
-**Evaluate:**  
-I will verify the fix manually by launching RimSort locally, selecting **Download → Verify Game Files**, and confirming that a prompt appears before the verification flow begins. I will test both cancel and confirm behavior. I will also run any relevant project checks recommended by the repository before submitting a pull request.
+- Follows RimSort's existing dialog style.
+- Changes only the files required for issue #1735.
+- Prevents the verification flow when the user cancels.
+- Preserves the existing verification behavior when the user confirms.
+- Does not add a second confirmation to the Troubleshooting flow.
+- Includes automated and manual validation for both outcomes.
 
 ---
 
@@ -197,29 +180,29 @@ I will verify the fix manually by launching RimSort locally, selecting **Downloa
 
 ### Automated Tests
 
-I added two automated tests in `tests/views/test_menu_bar.py` under the
+I added automated coverage in `tests/views/test_menu_bar.py` under the
 `TestMenuBarGameFileVerification` class.
 
-The tests trigger the real `steam_verify_game_files_action` from the menu bar
+The final version uses one parametrized pytest test with two named cases:
+
+- `confirmed_emits_event`
+- `cancelled_does_not_emit_event`
+
+The test triggers the real `steam_verify_game_files_action` from the menu bar
 instead of calling the controller method directly. This validates both the Qt
 action connection and the confirmation behavior.
 
-#### Test 1: Confirmation accepted
+For the confirmed case, `show_dialogue_conditional()` returns `True`, the real
+menu action is triggered, the exact dialog title, message, and warning icon are
+verified, and `do_steam_verify_game_files.emit()` must be called exactly once.
 
-`test_verify_game_files_confirmed_emits_event`
+For the canceled case, `show_dialogue_conditional()` returns `False`, the same
+menu action and dialog assertions are exercised, and the verification event
+must not be emitted.
 
-This test mocks `show_dialogue_conditional()` to return `True`, triggers the
-real menu action, verifies that the warning dialog is shown with the expected
-title, message, and warning icon, and confirms that
-`do_steam_verify_game_files.emit()` is called exactly once.
-
-#### Test 2: Confirmation canceled
-
-`test_verify_game_files_cancelled_does_not_emit_event`
-
-This test mocks `show_dialogue_conditional()` to return `False`, triggers the
-real menu action, confirms that the dialog is displayed, and verifies that
-`do_steam_verify_game_files.emit()` is not called.
+This parametrized structure preserves both behavioral checks while avoiding the
+duplicate test setup that was later flagged by RimSort's JSCPD check during
+Phase IV.
 
 #### Focused Test Command
 
@@ -332,53 +315,116 @@ being emitted, while confirming preserves the existing verification behavior.
 The separate Troubleshooting flow also remained unchanged, as confirmed by the
 combined automated regression run with 24 passing tests.
 
+
+### Phase IV Full Project Test Suite
+
+After rebasing the branch onto the latest `upstream/main`, I ran the complete
+RimSort test suite:
+
+```powershell
+uv run pytest -v
+```
+
+Result:
+
+```text
+1120 passed, 13 skipped in 91.19s
+```
+
+The full suite completed with zero failures.
+
+### Phase IV Pull Request CI Validation
+
+After the pull request was opened, RimSort's GitHub Actions checks initially
+reported one Ruff formatting issue. I applied the required formatting change
+and pushed an updated commit.
+
+A later lint run reported duplicate test setup through JSCPD. I reviewed the
+exact duplicate line ranges and refactored the two similar tests into one
+parametrized test with separate confirm and cancel cases.
+
+After the refactor, the pull request completed with:
+
+```text
+26 successful checks
+2 skipped checks
+0 failed checks
+```
+
+Codecov also reported that all modified and coverable lines were covered by
+tests.
+
 ---
 
 ## Phase III Testing Rubric Mapping
 
 | Rubric Requirement | Evidence |
 |---|---|
-| Branch contains meaningful commits since Phase II | Implementation commit `f8142df` and test commit `e3894c49` are present on `fix-issue-1735`. |
-| Commit cadence is regular | Meaningful implementation, testing, validation, and documentation work was completed across July 13, July 15, July 16, and final Phase III validation. |
-| Commit messages are descriptive | `Add confirmation before menu game file verification`, `Add tests for game verification confirmation`, and `Document Phase III implementation and validation`. |
+| Branch contains meaningful commits since Phase II | Phase III includes separate implementation, automated testing, strengthened assertion, validation, and documentation work. |
+| Commit cadence is regular | Meaningful implementation, testing, validation, and documentation work was completed across July 13, July 15, July 16, and July 18. |
+| Commit messages are descriptive | Phase III commits clearly describe the implementation, automated tests, and strengthened dialog assertions. |
 | Diff is scoped to the issue | Implementation changed only `app/controllers/menu_bar_controller.py`; tests changed only `tests/views/test_menu_bar.py`. |
-| At least one new test exercises the fix | Two new tests exercise both confirmation accepted and confirmation canceled behavior. |
+| At least one new test exercises the fix | The Phase III tests exercise both confirmation accepted and confirmation canceled behavior. |
 | Existing tests still pass | Focused tests: `2 passed`; complete menu-bar tests: `8 passed`; combined menu-bar and Troubleshooting validation: `24 passed in 3.08s`. |
-| Tests follow project patterns | Tests use the existing pytest, `unittest.mock.patch`, Qt action trigger, and `EventBus` mocking patterns already used in RimSort tests. |
-| Implementation Progress names files and commits | The README lists both modified files and commit hashes `f8142df` and `e3894c49`. |
+| Tests follow project patterns | Tests use pytest, `unittest.mock.patch`, the real Qt action trigger, and `EventBus` mocking patterns already used in RimSort tests. |
+| Implementation Progress names files and commits | The README identifies both modified files and the relevant Phase III implementation and test work. |
 | Challenges Faced documents real obstacles | The README documents scope placement, the incorrect global Python environment, and restoring an overly broad early diff. |
 | Testing notes explain manual and automated validation | The README includes focused, full-file, regression, syntax, diff, and manual confirm/cancel validation results. |
 | Engineering judgment beyond the minimum | The confirmation was intentionally limited to the menu-bar entry point to avoid changing the separate Troubleshooting flow, and the implementation reused RimSort's existing `show_dialogue_conditional` helper. |
 
+---
+
+## Phase IV Submission Rubric Mapping
+
+| Rubric Requirement | Evidence |
+|---|---|
+| PR is open against upstream `main` | [RimSort PR #2338](https://github.com/RimSort/RimSort/pull/2338) is open from `a-pena:fix-issue-1735` to `RimSort/RimSort:main` and is not a draft. |
+| PR uses the project template or equivalent structure | The PR uses a complete What / Why / Issue / Testing / Acceptance Criteria structure. |
+| PR references the issue with a closing keyword | The PR description includes `Closes #1735`. |
+| Why appears before implementation details | The PR explains the accidental non-cancelable action and why confirmation is needed before summarizing the implementation. |
+| Acceptance criteria checklist is complete | All acceptance criteria in the PR description are checked. |
+| Testing evidence is included | The PR includes the full-suite result, and this README documents focused, regression, manual, full-suite, and CI validation. |
+| PR link, summary, and current status are documented | The Pull Request section includes the direct link, contribution summary, and `Pull request submitted — Awaiting Review` status. |
+| README includes Phase IV progress | The README documents the upstream rebase, backup branch, `--force-with-lease`, PR creation, Ruff response, JSCPD refactor, and final CI result. |
+| Learnings and reflections are substantive | Technical Skills Gained, Challenges Overcome, and What I'd Do Differently Next Time are divided into Phases I, II, III, and IV. |
+| README remains internally consistent | The Phase II plan is clearly distinguished from the Phase III final implementation and the Phase IV PR/CI work. |
+
+---
+
 ## Implementation Notes
 
-### Week 1 Progress
+### Phase I Progress
 
-For Phase I, I selected RimSort issue #1735 as my second contribution issue. I reviewed the issue, confirmed that the problem is clear and user-facing, commented on GitHub to express interest, forked the RimSort repository, and created this Contribution README repository to track my work.
+For Phase I, I selected RimSort issue #1735 as my second contribution issue. I
+reviewed the issue, confirmed that the problem was clear and user-facing,
+commented on GitHub to express interest, forked the RimSort repository, created
+this separate contribution README repository, and created the
+`fix-issue-1735` working branch.
 
-### Week 2 Progress
+### Phase II Progress
 
-During Phase II, I set up RimSort locally on Windows, cloned my fork with submodules, created the `fix-issue-1735` working branch, and launched the app from source using:
+During Phase II, I set up RimSort locally on Windows, cloned my fork with
+submodules, installed the required tools, launched the application from source,
+and reproduced the issue.
 
-```powershell
-uv run python -m app
-```
+I opened **Download → Verify Game Files** and confirmed that RimSort entered the
+verification flow without showing a confirmation prompt first. Because Steam
+Client Integration was disabled in my environment, RimSort immediately
+displayed its existing Steam Client Integration warning.
 
-I reproduced the issue by opening the **Download** menu and selecting **Verify Game Files**. RimSort did not show a confirmation prompt before entering the verification flow. In my local setup, Steam Client Integration was disabled, so the app immediately displayed a warning that Steam Client Integration is required. This confirmed that the menu action currently starts verification-related behavior without asking for confirmation first.
+I also traced the menu action through `app/views/menu_bar.py` and the shared
+verification behavior in `app/views/main_content_panel.py`. This created the
+initial implementation plan for Phase III.
 
-I also investigated the codebase and found that the **Verify Game Files** menu action is created in `app/views/menu_bar.py`, while the verification behavior is handled by `do_steam_verify_game_files()` in `app/views/main_content_panel.py`. My Phase III plan is to add a confirmation dialog before the existing verification logic continues.
+### Phase III Progress
 
-### Week 3 Progress
-
-During Phase III, I traced the **Verify Game Files** menu action from
-`app/views/menu_bar.py` through `app/controllers/menu_bar_controller.py` and
-the shared Steam verification signal.
+During Phase III, I traced the action through
+`app/controllers/menu_bar_controller.py` and the shared Steam verification
+signal.
 
 The original menu-bar action was connected directly to
-`EventBus().do_steam_verify_game_files`, which meant the verification flow
-started immediately when the user selected the action.
-
-I changed the connection so that it now calls a new controller method:
+`EventBus().do_steam_verify_game_files`, so I changed the connection to call a
+new controller method:
 
 ```python
 self.menu_bar.steam_verify_game_files_action.triggered.connect(
@@ -387,28 +433,59 @@ self.menu_bar.steam_verify_game_files_action.triggered.connect(
 ```
 
 The new `_on_steam_verify_game_files_triggered()` method reuses RimSort's
-existing `show_dialogue_conditional` helper and displays a warning explaining
-that the process cannot be canceled after it begins.
-
-If the user cancels or dismisses the confirmation, the method returns without
-emitting the verification event. If the user confirms, the existing
-`do_steam_verify_game_files` event is emitted and the original verification
+existing `show_dialogue_conditional` helper. If the user cancels or dismisses
+the prompt, the method returns without emitting the verification event. If the
+user confirms, the existing verification event is emitted and the original
 flow continues unchanged.
 
-I intentionally placed the confirmation in
-`app/controllers/menu_bar_controller.py` rather than inside the shared
-`do_steam_verify_game_files()` implementation. This keeps the change scoped to
-the menu-bar behavior requested in issue #1735 and avoids adding an unexpected
-second confirmation to the separate Troubleshooting flow.
+I intentionally placed the confirmation in `MenuBarController` rather than in
+the shared `do_steam_verify_game_files()` implementation. This kept the change
+limited to the menu-bar behavior requested in issue #1735 and avoided adding an
+unexpected second confirmation to the Troubleshooting flow.
 
-I also added two automated tests that exercise the real menu action and verify
-both the confirm and cancel paths. The focused tests passed, the complete menu
-bar test file passed, and the combined menu bar and Troubleshooting validation
-completed with 24 passing tests.
+I added automated coverage for both outcomes, verified the exact dialog
+arguments, ran focused and regression tests, completed manual testing, and
+confirmed that the separate Troubleshooting flow remained unchanged.
 
-### Week 4 Progress
+### Phase IV Progress
 
-To be completed in Phase IV.
+During Phase IV, I added the original RimSort repository as the `upstream`
+remote, fetched the latest changes, and found that my branch was behind the
+current upstream branch.
+
+Before rebasing, I created a backup branch:
+
+```text
+backup-fix-issue-1735-before-rebase
+```
+
+I rebased `fix-issue-1735` onto the latest `upstream/main`, verified that the
+branch remained scoped to the issue, and safely updated my fork using
+`--force-with-lease`.
+
+I then opened [RimSort PR #2338](https://github.com/RimSort/RimSort/pull/2338)
+from `a-pena:fix-issue-1735` to `RimSort/RimSort:main`. The PR is open, is not a
+draft, references issue #1735 with `Closes #1735`, and includes a complete
+description with the purpose, motivation, testing evidence, and acceptance
+criteria.
+
+The first GitHub Actions run reported a Ruff formatting issue. I applied the
+required formatting and pushed the update.
+
+A later lint run reported duplicate test setup through JSCPD. I reviewed the
+reported line ranges and refactored the two similar tests into one parametrized
+test with named confirm and cancel cases.
+
+After the final update, all required checks passed:
+
+```text
+26 successful checks
+2 skipped checks
+0 failed checks
+```
+
+The pull request has been submitted and is currently awaiting review. A merge is
+not required for this Phase IV CodePath submission.
 
 ### Code Changes
 
@@ -418,54 +495,78 @@ To be completed in Phase IV.
   - Imported RimSort's existing `show_dialogue_conditional` helper.
   - Reconnected `steam_verify_game_files_action` to the new controller method.
   - Added `_on_steam_verify_game_files_triggered()`.
-  - Added confirm and cancel control flow before emitting the existing
-    verification event.
+  - Added confirm and cancel control flow before emitting the existing event.
 
 #### Test File
 
 - `tests/views/test_menu_bar.py`
   - Added `TestMenuBarGameFileVerification`.
-  - Added a test for the confirmed path.
-  - Added a test for the canceled path.
-  - Triggered the real Qt menu action in both tests.
+  - Triggered the real Qt menu action.
+  - Verified the exact dialog title, message, and warning icon.
+  - Verified both confirm and cancel behavior.
+  - Refactored the final test coverage into a parametrized test to satisfy
+    JSCPD without reducing behavioral coverage.
 
-#### Key Phase III Commits
+### Key Implementation and CI-Response Commits
 
-| Commit | Description |
-|---|---|
-| `f8142df` | Added confirmation before menu-bar game-file verification |
-| `e3894c49` | Added automated tests for confirmation and cancellation |
+| Commit | Phase | Description |
+|---|---|---|
+| `afa7f2d` | Phase III | Added confirmation before menu-bar game-file verification |
+| `36cd95b` | Phase III | Added automated tests for confirmation and cancellation |
+| `0ac4daa` | Phase III | Strengthened cancellation dialog assertions |
+| `81cfbc92` | Phase IV | Applied Ruff formatting to the menu-bar tests |
+| `08f9eb2` | Phase IV | Refactored game-verification tests to avoid duplicate code |
 
-#### Scope Decision
+### Scope Decision
 
 The confirmation was added only to the menu-bar entry point. I did not modify
 `app/views/main_content_panel.py` or the shared verification implementation
 because doing so could affect other callers, including the existing
-Troubleshooting flow. This keeps the diff directly scoped to issue #1735 and
-preserves existing behavior outside the menu bar.
+Troubleshooting flow.
 
-#### Commit Cadence
+### Commit Cadence
 
-The implementation and testing work were completed as separate, meaningful
-commits:
-
-- July 13, 2026: implementation
-- July 15, 2026: automated tests
+- July 13, 2026: Phase III implementation
+- July 15, 2026: Phase III automated tests
 - July 16, 2026: Phase III validation and documentation
+- July 18, 2026: Phase III strengthened dialog assertions
+- July 24–25, 2026: Phase IV upstream rebase, PR submission, Ruff formatting
+  response, JSCPD refactor, and final CI validation
 
 ---
 
 ## Pull Request
 
-**PR Link:** To be added in Phase IV.
+**PR Link:** [RimSort/RimSort #2338 — Add confirmation before verifying game files from menu bar](https://github.com/RimSort/RimSort/pull/2338)
 
-**PR Description:** To be drafted in Phase IV.
+**PR Description:**  
+This pull request adds a confirmation dialog before game-file verification is
+triggered from the menu bar. If the user confirms, RimSort continues into the
+existing verification flow. If the user cancels, the verification event is not
+emitted.
 
-**Maintainer Feedback:**
+The change is intentionally limited to the menu-bar entry point so the separate
+Troubleshooting verification flow remains unchanged.
 
-- To be added when feedback is received.
+The pull request references the original issue using:
 
-**Status:** Not submitted yet.
+```text
+Closes #1735
+```
+
+**Testing Summary:**
+
+- Focused confirmation tests passed.
+- Complete menu-bar tests passed.
+- Related Troubleshooting regression tests passed.
+- Full project suite result: `1120 passed, 13 skipped`.
+- GitHub Actions result: `26 successful checks, 2 skipped checks, 0 failed checks`.
+- Codecov confirmed that all modified and coverable lines are covered by tests.
+
+**Status:** Pull request submitted — Awaiting Review.
+
+**Merge Status:** Not merged yet. A merge is not required for the current
+CodePath Phase IV submission.
 
 ---
 
@@ -473,48 +574,247 @@ commits:
 
 ### Technical Skills Gained
 
-During Phase I, I strengthened my understanding of the open source contribution workflow, including selecting an issue, checking whether it is active and claimable, forking the target repository, and creating a separate contribution README to document my process. I also practiced reading a GitHub issue carefully and translating the maintainer/user request into a clear problem summary, expected behavior, current behavior, and initial implementation direction.
+#### Phase I
 
-During Phase II, I practiced setting up a real open source Python desktop application locally, including cloning a repository with submodules, installing required tools, creating a working branch, running project setup commands, and launching the application from source. I also practiced using code search to trace a UI menu action from the visible application behavior to the files and functions involved in the codebase.
+During Phase I, I strengthened my understanding of the open source contribution
+workflow, including selecting an issue, checking whether it was active and
+claimable, commenting on the issue, forking the target repository, creating a
+working branch, and maintaining a separate contribution README.
 
-This phase also helped me think more intentionally about user experience in desktop applications. For RimSort issue #1735, the main technical idea is not just “add a pop-up,” but to protect users from accidentally starting a non-cancelable action. I learned to identify this as a UI safety improvement and to plan for a fix that follows the existing project patterns.
+I also practiced translating a GitHub issue into a clear problem description,
+expected behavior, current behavior, affected components, and initial
+implementation direction.
+
+#### Phase II
+
+During Phase II, I practiced setting up a real open source Python desktop
+application locally on Windows. This included cloning a repository with
+submodules, installing and verifying `uv` and `just`, creating and pushing a
+working branch, running the project setup, and launching RimSort from source.
+
+I also improved my ability to trace a visible UI action through an unfamiliar
+codebase. I identified where the **Verify Game Files** action was created,
+followed its signal connection, and reviewed the shared verification behavior.
+
+This phase also helped me think more intentionally about user experience and
+safety. The goal of issue #1735 was not simply to add a pop-up, but to prevent
+users from accidentally starting a process that cannot be canceled once it
+begins.
+
+#### Phase III
+
+During Phase III, I gained experience with event-driven behavior in a PySide6
+application. I traced the menu action through `MenuBarController` and RimSort's
+`EventBus`, reused `show_dialogue_conditional`, and added confirm and cancel
+control flow before emitting the existing verification event.
+
+I also strengthened my automated testing skills. I wrote tests that trigger the
+real Qt menu action rather than calling the controller method directly. The
+tests verify the exact dialog title, message, and warning icon, as well as
+whether the existing event is emitted after confirmation or prevented after
+cancellation.
+
+I practiced running several levels of validation:
+
+- Focused tests for the new behavior
+- The complete menu-bar test file
+- Related Troubleshooting regression tests
+- Syntax validation
+- Diff and whitespace validation
+- Manual application testing
+
+#### Phase IV
+
+During Phase IV, I learned how to prepare a contribution branch for an upstream
+pull request. I added the original repository as `upstream`, fetched the latest
+changes, created a backup branch, rebased onto the current `upstream/main`, and
+safely updated my fork using `--force-with-lease`.
+
+I also gained practical experience reading and responding to GitHub Actions
+results. I learned to distinguish between Ruff formatting, MyPy validation,
+JSCPD duplicate-code detection, automated builds, test coverage reports, and
+skipped checks.
+
+The JSCPD failure was especially useful because it required improving the test
+structure rather than bypassing the lint rule. I refactored the two similar
+tests into one parametrized pytest test with separate named cases for
+confirmation and cancellation.
+
+After the refactor, all pull-request checks passed:
+
+```text
+26 successful checks
+2 skipped checks
+0 failed checks
+```
+
+I also learned how to prepare a complete upstream pull request description that
+explains why the change is needed, summarizes the implementation, references
+the issue with `Closes #1735`, documents testing results, and includes completed
+acceptance criteria.
+
+---
 
 ### Challenges Overcome
 
-One challenge during Phase I was organizing Contribution 2 separately from my first contribution. I decided to create a separate repository for this second contribution README so that my RimSort work can stay clean and easy to track without mixing it with my completed USACO contribution.
+#### Phase I
 
-Another challenge was making sure I did not jump ahead into implementation too early. Since Phase I was focused on issue selection, claiming, forking, and documentation, I kept the README honest by marking reproduction, solution details, testing, and pull request sections as future work for later phases. This helped me keep the scope clear and follow the contribution process step by step.
+During Phase I, one challenge was organizing Contribution 2 separately from my
+first contribution. I created a separate README repository so that the RimSort
+work could remain clean, focused, and easy to evaluate.
 
-During Phase II, I had to install missing development tools and confirm the project could run locally on Windows. I installed `uv` and `just`, cloned the project with submodules, and ran the setup successfully. I also had to handle first-launch prompts related to missing RimSort paths, SteamCMD, and Steam Client Integration. Instead of treating these prompts as blockers, I documented them as part of the local setup and continued testing the menu action needed for the issue.
+Another challenge was following the course phases without documenting work that
+had not yet been completed. I kept the README accurate by separating issue
+selection, reproduction, implementation, testing, and pull-request work into
+the appropriate phases.
 
-During Phase III, one challenge was determining where the confirmation should
-be added. The verification event is shared with another workflow in the
+#### Phase II
+
+During Phase II, I had to install missing development tools and confirm that
+RimSort could run locally on Windows. I installed `uv` and `just`, cloned the
+repository with submodules, completed the setup, and launched the application.
+
+I also encountered first-launch prompts related to missing RimSort paths,
+SteamCMD, and Steam Client Integration. Instead of treating those prompts as
+blockers, I documented them and continued testing the menu action required for
+the issue.
+
+#### Phase III
+
+During Phase III, one of the main challenges was deciding where the confirmation
+should be added. The verification event is shared with another workflow in the
 Troubleshooting panel. Adding the dialog inside the shared verification method
-could have changed behavior beyond the menu-bar issue. I resolved this by
-placing the confirmation in `MenuBarController`, immediately before the
-menu-bar action emits the existing event.
+could have introduced an unexpected confirmation into that separate workflow.
 
-Another challenge was running the new tests with the correct Python
-environment. Running `python -m pytest` initially used the global Python 3.13
-installation, which did not have `pytest` installed. Rather than installing
-packages into the global environment, I inspected the repository configuration
-and found the project's `.venv`, `uv.lock`, and pytest dependencies in
-`pyproject.toml`. I then ran the tests through `uv run pytest`, which used
-RimSort's configured environment successfully.
+I resolved this by placing the confirmation inside `MenuBarController`,
+immediately before the menu-bar action emits the existing verification event.
+This kept the change limited to the behavior requested in issue #1735.
 
-I also had to ensure the implementation diff stayed focused. An early
-full-file replacement introduced unrelated formatting changes. I restored the
-original file and reapplied only the required import, signal connection, and
-controller method. The final implementation diff changed one file with 17
-insertions and one deletion.
+Another challenge was running the tests with the correct Python environment.
+Running `python -m pytest` initially used the global Python installation, which
+did not contain the project dependencies. Rather than modifying the global
+environment, I inspected the repository configuration and used:
+
+```powershell
+uv run pytest
+```
+
+I also had to keep the implementation diff focused. An early full-file
+replacement introduced unrelated formatting changes. I restored the original
+file and reapplied only the required import, signal connection, and controller
+method.
+
+During application validation, an unrelated generated translation-file change
+appeared locally. I identified it with `git status --short`, restored it before
+committing, and confirmed that the issue-related work remained limited to the
+two intended files.
+
+#### Phase IV
+
+During Phase IV, the branch was behind the current upstream repository. Rebasing
+an active contribution branch required extra care because rewriting history can
+create risks. I created a backup branch before the rebase, verified the branch
+relationship against `upstream/main`, completed the rebase, and used
+`--force-with-lease` rather than a regular force push.
+
+The first pull-request CI run reported a Ruff formatting problem. I reviewed the
+output, ran the formatter, committed the correction, and pushed the update.
+
+A later CI run failed because JSCPD found duplicated setup between the two
+tests. The report showed the exact duplicate line ranges. I replaced the two
+separate tests with one parametrized test that exercises both behaviors.
+
+The focused tests continued to pass after the refactor:
+
+```text
+2 passed, 6 deselected
+```
+
+The final GitHub Actions run completed with no failed checks.
+
+---
 
 ### What I'd Do Differently Next Time
 
-Next time, I would start by creating the contribution README repository first and pasting the full template before filling in any details. That would make it easier to keep the documentation organized from the beginning.
+#### Phase I
 
-I would also create a small personal checklist before starting Phase I, including: confirm the issue is open, check labels and assignees, comment on the issue, fork the project, create the README, and update the status. Having that checklist ready would make the process faster and reduce confusion.
+For future Phase I work, I would create the contribution README repository and
+paste the complete course template before filling in any details. This would
+help keep every section organized from the beginning and reduce the risk of
+leaving outdated placeholders in later phases.
 
-For future Phase II work, I would check the project’s required tools earlier before cloning or running setup. Verifying `uv`, `just`, the Python version, and submodule requirements first would make the setup process smoother.
+I would also prepare a short issue-selection checklist:
+
+1. Confirm that the issue is open.
+2. Review labels, assignees, and recent activity.
+3. Confirm that no other contributor is actively working on it.
+4. Comment on the issue.
+5. Fork the project.
+6. Create the working branch.
+7. Create and update the contribution README.
+8. Record the issue and branch links.
+
+#### Phase II
+
+For future Phase II work, I would verify all project requirements before
+beginning the local setup. I would check the required Python version, package
+manager, virtual environment, submodules, development commands, and
+platform-specific requirements before cloning or running the application.
+
+I would also trace the complete event flow before finalizing the implementation
+plan. In this contribution, Phase II identified the shared verification method,
+while deeper Phase III investigation showed that the safer implementation
+location was the menu-bar signal connection in `MenuBarController`.
+
+#### Phase III
+
+For future Phase III work, I would inspect existing tests and local project
+quality requirements before writing the final test structure.
+
+I would use a parametrized pytest test from the beginning when multiple
+behaviors share the same setup and differ only in input and expected outcome.
+
+I would also complete this checklist before considering implementation and
+testing finished:
+
+1. Run focused tests.
+2. Run complete tests for the modified component.
+3. Run related regression tests.
+4. Run syntax validation.
+5. Run `git diff --check`.
+6. Run `git status --short`.
+7. Review the complete final diff.
+8. Complete manual confirm and cancel testing.
+9. Update the README with exact results.
+
+#### Phase IV
+
+For future Phase IV work, I would review the repository's complete GitHub
+Actions workflow before opening the pull request. My local pytest results
+passed, but the upstream workflow also enforced Ruff formatting and a
+zero-duplication JSCPD threshold.
+
+I would run the same formatting, lint, type-checking, duplicate-code, and
+full-suite checks locally before submitting the PR whenever those commands are
+available.
+
+I would continue creating a backup branch before rebasing and using
+`--force-with-lease` instead of a regular force push.
+
+I would also prepare the PR and README update together, including:
+
+- Direct PR link
+- Current submission status
+- Issue-closing reference
+- Final test results
+- CI results
+- Files changed
+- Important implementation decisions
+- Automated or maintainer feedback
+- Commit references for follow-up changes
+
+This would keep the contribution documentation synchronized with the actual PR
+and prevent outdated placeholders from remaining in the final submission.
 
 ---
 
@@ -524,6 +824,9 @@ For future Phase II work, I would check the project’s required tools earlier b
 - [RimSort repository](https://github.com/RimSort/RimSort)
 - [My RimSort fork](https://github.com/a-pena/RimSort)
 - [My working branch: fix-issue-1735](https://github.com/a-pena/RimSort/tree/fix-issue-1735)
+- [Pull request #2338](https://github.com/RimSort/RimSort/pull/2338)
 - Local files reviewed:
   - `app/views/menu_bar.py`
   - `app/views/main_content_panel.py`
+  - `app/controllers/menu_bar_controller.py`
+  - `tests/views/test_menu_bar.py`
