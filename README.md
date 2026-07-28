@@ -133,26 +133,81 @@ The application launched successfully. During first launch, RimSort displayed se
 
 ### Phase II Analysis and Plan
 
-During Phase II, I identified that the **Verify Game Files** menu action was
-connected directly to the existing verification flow. My initial plan was to
-add a confirmation step before that flow continued, reuse RimSort's existing
-dialog patterns, and manually verify both the confirm and cancel paths.
+During Phase II, I traced the **Verify Game Files** menu action through the
+RimSort codebase to determine why verification-related behavior started
+immediately when the menu item was selected.
 
-The menu item is created in `app/views/menu_bar.py`:
+#### Root Cause Hypothesis
 
-```python
-self.steam_verify_game_files_action = self._add_action(
-    download_menu, self.tr("Verify Game Files")
-)
-```
+The root cause was not simply that the confirmation dialog was missing. The
+underlying cause was that `steam_verify_game_files_action` was connected
+directly to `EventBus().do_steam_verify_game_files` in
+`app/controllers/menu_bar_controller.py`.
 
-The shared verification behavior eventually reaches
-`do_steam_verify_game_files()` in `app/views/main_content_panel.py`.
+Because the Qt menu action emitted the existing verification event directly,
+there was no controller method or conditional step between the user's click and
+the start of the verification flow. As a result, RimSort had no opportunity to
+ask the user for confirmation before emitting the event.
+
+The menu action itself is created in:
+
+- `app/views/menu_bar.py`
+
+The direct signal connection that caused the behavior was located in:
+
+- `app/controllers/menu_bar_controller.py`
+
+The existing shared verification flow eventually continues through:
+
+- `app/views/main_content_panel.py`
+
+I determined that modifying the shared verification method in
+`app/views/main_content_panel.py` could unintentionally affect other callers,
+including the separate Troubleshooting verification flow. Therefore, the safest
+planned solution was to intercept only the menu-bar action inside
+`MenuBarController`.
+
+#### Files Planned for Modification
+
+I planned to modify the following files:
+
+- `app/controllers/menu_bar_controller.py`
+  - Replace the direct connection from `steam_verify_game_files_action` to
+    `EventBus().do_steam_verify_game_files`.
+  - Connect the menu action to a new controller method.
+  - Use RimSort's existing confirmation-dialog helper inside that method.
+  - Emit the existing verification event only after the user confirms.
+  - Return without emitting the event when the user cancels.
+
+- `tests/views/test_menu_bar.py`
+  - Add automated coverage for the confirmation flow.
+  - Verify that confirming emits the existing verification event.
+  - Verify that canceling does not emit the event.
+  - Trigger the actual Qt menu action so the test also validates the signal
+    connection.
+
+I reviewed `app/views/menu_bar.py` to locate the action and
+`app/views/main_content_panel.py` to understand the downstream verification
+flow, but I did not plan to modify those files because the fix could be scoped
+more safely to the controller connection.
+
+#### Planned Implementation Behavior
+
+1. Reconnect `steam_verify_game_files_action` to a new controller method in
+   `app/controllers/menu_bar_controller.py`.
+2. Display a confirmation dialog before emitting the verification event.
+3. Clearly warn that the process cannot be canceled once it starts.
+4. Return immediately when the user declines the confirmation.
+5. Emit `do_steam_verify_game_files` only when the user confirms.
+6. Preserve the existing shared verification behavior.
+7. Leave the separate Troubleshooting verification flow unchanged.
+8. Add automated tests in `tests/views/test_menu_bar.py` for both the confirm
+   and cancel paths.
 
 ### Phase III Final Implementation
 
-During Phase III, deeper code tracing showed that adding the confirmation inside
-the shared verification method could also affect the separate Troubleshooting
+During Phase III, deeper code tracing confirmed that adding the confirmation
+inside the shared verification method could affect the separate Troubleshooting
 workflow. I therefore implemented the confirmation at the menu-bar entry point
 inside `app/controllers/menu_bar_controller.py`.
 
@@ -175,7 +230,7 @@ I reviewed the final change to confirm that it:
 - Preserves the existing verification behavior when the user confirms.
 - Does not add a second confirmation to the Troubleshooting flow.
 - Includes automated and manual validation for both outcomes.
-
+  
 ---
 
 ## Testing Strategy
@@ -422,9 +477,25 @@ verification flow without showing a confirmation prompt first. Because Steam
 Client Integration was disabled in my environment, RimSort immediately
 displayed its existing Steam Client Integration warning.
 
-I also traced the menu action through `app/views/menu_bar.py` and the shared
-verification behavior in `app/views/main_content_panel.py`. This created the
-initial implementation plan for Phase III.
+I traced the menu action from its creation in `app/views/menu_bar.py` to its
+signal connection in `app/controllers/menu_bar_controller.py` and then reviewed
+the downstream verification behavior in `app/views/main_content_panel.py`.
+
+This analysis identified the root cause: the menu action was connected directly
+to `EventBus().do_steam_verify_game_files`, leaving no controller method or
+conditional step where RimSort could ask for confirmation before emitting the
+verification event.
+
+Based on that root cause, I planned to modify:
+
+- `app/controllers/menu_bar_controller.py` to replace the direct event
+  connection with a confirmation-aware controller method.
+- `tests/views/test_menu_bar.py` to test both the confirm and cancel paths
+  through the actual Qt menu action.
+
+I reviewed `app/views/menu_bar.py` and `app/views/main_content_panel.py` to
+understand the complete flow, but I did not plan to modify them because the fix
+could be safely scoped to the controller connection and its automated tests.
 
 ### Phase III Progress
 
